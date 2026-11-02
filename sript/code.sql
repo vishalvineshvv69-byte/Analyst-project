@@ -206,3 +206,101 @@ with cte as (select  p.category , p.product_name , sum (s.sales_amount) as  sum 
 
 -- Top 1 customer in each country
 with cte as (select c.country , c.customer_key , sum (s.sales_amount) as sum, row_number() over(partition by c.country order by sum (s.sales_amount) desc) as rank from dbo.fact_sales as s left join dbo.dim_customers as c on s.customer_key = c.customer_key group by c.country , c.customer_key) select * from cte where rank = 1;
+
+
+
+
+
+
+
+-- section : 7. Change OverTime (Trends)
+
+
+-- Total sales, customer count and quantity per year.
+select datetrunc(year,order_date) , sum (sales_amount) , count (distinct customer_key ) , sum(quantity)from dbo.fact_sales group by datetrunc(year,order_date) order by datetrunc(year,order_date)  asc;
+
+-- Total sales per month (across all years) to see seasonality
+select concat(cast(year(order_date)as varchar) ,' ',datename(month,order_date)),sum(sales_amount) from dbo.fact_sales group by year(order_date) , datename(month,order_date) order by year(order_date) ,  datename(month,order_date) asc;
+
+-- Total sales per year-month using DATETRUNC / FORMAT / DATEPART.
+select datetrunc(month,order_date) ,sum(sales_amount) from dbo.fact_sales group by datetrunc(month,order_date) order by datetrunc(month,order_date) asc;
+
+-- Number of new customers per month (using create_date).
+select datetrunc(month,create_date) ,count(customer_key) from dbo.dim_customers group by datetrunc(month,create_date);
+
+-- Running total of sales over time.
+select datetrunc(month,order_date) ,sum(sales_amount) , sum(sum(sales_amount)) over  (order by datetrunc(month,order_date)) from dbo.fact_sales group by datetrunc(month,order_date);
+
+-- Moving average of price over time
+select datetrunc(month,order_date), avg (sum(sales_amount)) over  (order by datetrunc(month,order_date) rows between 1 preceding  and 1 following )  from dbo.fact_sales group by datetrunc(month,order_date);
+
+-- Month-over-month growth in sales.
+with cte as (select concat(cast(year(order_date)as varchar) ,' ',datename(month,order_date)) as months,sum(sales_amount) as TotalSales from dbo.fact_sales group by year(order_date) , datename(month,order_date) ,  datename(month,order_date) ) select * , lag(TotalSales) over (order by months) as PriviouMonthSales , TotalSales - lag(TotalSales) over (order by months) as SalesDiff  from cte;
+
+-- Which month has the highest sales in each year?
+with cte as (select concat(cast(year(order_date) as varchar),'  ', datename(month,order_date)) months , sum(sales_amount) TotalSeles , row_number() over(partition by  year(order_date) order  by sum(sales_amount) desc)as rank from dbo.fact_sales group by year(order_date) , datename(month,order_date)) select * from cte where rank = 1;
+
+
+
+
+
+
+
+-- section : 8. Cumulative Analysis
+
+
+-- Running total of sales by month
+select datetrunc(month,order_date) , sum(sales_amount) , sum(sum(sales_amount))  over(order by datetrunc(month,order_date) )from dbo.fact_sales group by datetrunc(month,order_date);
+
+-- Running total of sales per year, resetting each year
+select year(order_date), datename(month,order_date), sum(sales_amount) , sum(sum(sales_amount))  over(partition by year(order_date) order by  year(order_date),datename(month,order_date) )from dbo.fact_sales group by year(order_date),datename(month,order_date);
+
+-- Cumulative average price over time.
+select datetrunc(month,order_date), avg (sum(sales_amount)) over  (order by datetrunc(month,order_date) rows between unbounded preceding  and 1 following )  from dbo.fact_sales group by datetrunc(month,order_date);
+
+--  Year-to-date (YTD) sales for each month
+select year(order_date), datename(month,order_date), sum(sales_amount) , sum(sum(sales_amount))  over(partition by year(order_date) order by  year(order_date),datename(month,order_date) )from dbo.fact_sales group by year(order_date),datename(month,order_date);
+
+--  Cumulative number of new customers over time
+select datetrunc(month,create_date) ,count(customer_key) from dbo.dim_customers group by datetrunc(month,create_date);
+
+
+
+
+
+
+
+-- section : 9. Performance Analysis
+
+
+-- Yearly sales for each product compared to that product's average sales.
+select datetrunc(month,order_date) , product_key , sum (sales_amount) , avg (sales_amount) , sum(sales_amount) - avg(sales_amount) from dbo.fact_sales group by datetrunc(month,order_date) , product_key order by  1,2;
+
+-- Yearly sales for each product compared to the previous year (LAG), with the difference and a flag: Increase / Decrease / No Change.
+with cte as (select product_key  ,  datetrunc(month,order_date) as months, sum(sales_amount) as TotalSales from dbo.fact_sales group by product_key ,  datetrunc(month,order_date) ) select * , lag(TotalSales) over (partition by  product_key order by months) , TotalSales -  lag(TotalSales) over (partition by  product_key order by months) ,case  when TotalSales -  lag(TotalSales) over (partition by  product_key order by months) < 0 then 'decress' when TotalSales -  lag(TotalSales) over (partition by  product_key order by months) > 0 then 'incress' else 'nochange'end from cte order by 1,2;
+
+-- Month-over-month change in total sales.
+select datetrunc(month,order_date) , sum(sales_amount) , lag(sum(sales_amount)) over (order by datetrunc(month,order_date) ) ,  sum(sales_amount) - lag(sum(sales_amount)) over (order by datetrunc(month,order_date) ) from dbo.fact_sales group by datetrunc(month,order_date);
+
+-- Percentage change year-over-year per category.
+select p.category , datetrunc(year,s.order_date), sum (s.sales_amount) , round(((cast(sum (s.sales_amount) as float) - lag( sum (s.sales_amount)) over (partition by p.category order by datetrunc(year,s.order_date))) /lag( sum (s.sales_amount)) over (partition by p.category order by datetrunc(year,s.order_date))) * 100,2) from dbo.fact_sales as s left join dbo.dim_products as p on s.product_key = p.product_key group by p.category , datetrunc(year,s.order_date) order by 1,2;
+
+-- Which products are consistently growing year after year?
+select * from (select * , lag(t.years) over (partition by product_key order by t.years) as pyx from (select product_key , datetrunc(year,order_date) as years , sum (sales_amount) TotalSales, lag(sum(sales_amount)) over (partition by product_key order by datetrunc(year,order_date)) as py, case when sum (sales_amount) - lag(sum(sales_amount)) over (partition by product_key order by datetrunc(year,order_date)) < 0 then 'decress' when  sum (sales_amount) - lag(sum(sales_amount)) over (partition by product_key order by datetrunc(year,order_date)) >  0 then 'incress' else 'nochange'end casee from dbo.fact_sales group by product_key , datetrunc(year,order_date) )t where t.casee = 'incress'  )x where x.pyx is not null and datediff(year,x.pyx,x.years) = 1order by  1,2 ;
+
+-- Compare each customer's yearly spending vs their own average
+select *  , avg (t.TotalSales) over (partition by t.customer_key) , t.TotalSales - avg (t.TotalSales) over (partition by t.customer_key) from (select customer_key , datetrunc(year,order_date) as months ,sum(sales_amount) TotalSales from dbo.fact_sales group by customer_key , datetrunc(year,order_date) )t order by 1,2;
+
+-- Compare each product's sales to the best-selling product (FIRST_VALUE or MAXOVER).
+select t.product_key, t.TotalSales, max(t.TotalSales) over() , t.TotalSales-   max(t.TotalSales) over()from (select product_key , sum(sales_amount) as TotalSales from dbo.fact_sales group by product_key)t order by t.product_key asc, t.TotalSales desc;
+
+
+
+
+
+
+
+-- section : 10. Part-to-Whole Analysis
+
+
+--
