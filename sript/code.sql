@@ -303,4 +303,50 @@ select t.product_key, t.TotalSales, max(t.TotalSales) over() , t.TotalSales-   m
 -- section : 10. Part-to-Whole Analysis
 
 
---
+-- What percentage of total sales does each category contribute?
+select p.category , sum(s.sales_amount) , sum(sum(s.sales_amount)) over() ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) from dbo.fact_sales as s left join dbo.dim_products as p on s.product_key = p.product_key group by p.category;
+
+-- Percentage of sales by country.
+select c.country , sum(s.sales_amount) , sum(sum(s.sales_amount)) over() ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) from dbo.fact_sales as s left join dbo.dim_customers as c on s.customer_key = c.customer_key group by c.country;
+
+-- Percentage of sales by gender and marital status.
+select c.gender, c.marital_status , sum(s.sales_amount) , sum(sum(s.sales_amount)) over() ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) from dbo.fact_sales as s left join dbo.dim_customers as c on s.customer_key = c.customer_key group by c.gender , c.marital_status order by 1,2;
+
+--  Percentage contribution of each product line.
+select p.product_line , sum(s.sales_amount) , sum(sum(s.sales_amount)) over() ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) from dbo.fact_sales as s left join dbo.dim_products as p on s.product_key = p.product_key group by p.product_line;
+
+-- Which subcategories contribute to the top 80% of sales (Pareto analysis)?
+select * from (select * , sum (t.per) over (order by per desc) as persum from (select p.subcategory , sum(s.sales_amount) total , sum(sum(s.sales_amount)) over() Grandtotal ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) as per from dbo.fact_sales as s left join dbo.dim_products as p on s.product_key = p.product_key group by p.subcategory)t)x where  x.persum - x.per < 80;
+
+-- What share of orders does each country make up?
+select c.country , count(s.order_number)  , sum(count(s.order_number)) over() ,round((cast(count(s.order_number) as float)/ sum(count(s.order_number)) over()) * 100,2) from dbo.fact_sales as s left join dbo.dim_customers as c on s.customer_key = c.customer_key group by c.country;
+
+-- Each year's share of overall sales.
+select year(order_date) , sum (sales_amount)  , sum(sum(sales_amount)) over()  , round((cast(sum (sales_amount)as float)  / sum(sum(sales_amount)) over())*100,2) from dbo.fact_sales group by year(order_date);
+
+
+
+
+
+
+
+-- section : 11. Data Segmentation
+
+
+-- Segment products by cost range (Below 100, 100-500, 500-1000, Above 1000) and count products in each segment.
+select t.cases , count(*) from (select case when cost < 100 then 'below100'  when cost between 100 and 500 then '100-500' when cost between 500 and 1000 then '500-1000' else 'above 500'end cases from dbo.dim_products )t group by t.cases;
+
+-- Segment customers by spending behavior and lifespan, then count customers in eachgroup: VIP: at least 12 months of history and spending over 5,000 Regular: at least 12 months of history and spending 5,000 or lessNew: lifespan less than 12 months
+select t.cases , count(*) from (select customer_key ,  case when  datediff(month,min(order_date), max(order_date) ) >= 12 and sum(sales_amount) > 5000 then 'VIP' when datediff(month,min(order_date), max(order_date) ) >= 12 and sum(sales_amount) <= 5000 then 'Regular' else 'new' end as cases  from dbo.fact_sales group by customer_key)t group by t.cases; 
+
+-- Segment customers by age group (Under 20, 20-29, 30-39, 40-49, 50+)
+select t.cases , count(*) from  (select customer_key , case when datediff(year,birthdate,getdate()) < 20 then 'under 20' when datediff(year,birthdate,getdate()) between 20 and 29  then '20-29' when datediff(year,birthdate,getdate()) between 30and 39  then '30-39'  when datediff(year,birthdate,getdate()) between 40 and 49  then '40-49' else '50+' end cases from dbo.dim_customers )t group by t.cases;
+
+-- Segment customers by order frequency (one-time, repeat, loyal)
+select t.cases , count(*) from (select case when count(*)  = 1 then 'one-time' when count(*) = 2 then 'Repeat' else 'loyal' end as cases from dbo.fact_sales group by customer_key)t group by t.cases;
+
+-- Segment products by sales performance (High, Medium, Low performers).
+select x.cases , count(*) from (select * ,case when t.per > 3 then 'High'  when t.per > 1 then 'Medium' else 'Low performers' end cases from (select p.product_name , sum(s.sales_amount) total , sum(sum(s.sales_amount)) over() Grandtotal ,round((cast(sum(s.sales_amount) as float)/ sum(sum(s.sales_amount)) over()) * 100,2) as per from dbo.fact_sales as s left join dbo.dim_products as p on s.product_key = p.product_key group by p.product_name)t)x group by x.cases;
+
+-- Group customers by country and age group, and show total sales for each.
+select t.country,t.cases , count(*) from  (select country,customer_key , case when datediff(year,birthdate,getdate()) < 20 then 'under 20' when datediff(year,birthdate,getdate()) between 20 and 29  then '20-29' when datediff(year,birthdate,getdate()) between 30and 39  then '30-39'  when datediff(year,birthdate,getdate()) between 40 and 49  then '40-49' else '50+' end cases from dbo.dim_customers )t group by t.country,t.cases order by 1,2;
